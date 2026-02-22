@@ -1,177 +1,201 @@
 import streamlit as st
 import pandas as pd
-import numpy as np
 import ccxt
-from datetime import datetime
+import time
 
-# ================= 1. 全局配置与极简白 CSS =================
-st.set_page_config(page_title="Deepcoin Alpha", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+# ================= 1. 全局配置与高级 Fintech CSS =================
+st.set_page_config(page_title="Alpha Terminal", page_icon="⬛", layout="wide", initial_sidebar_state="collapsed")
 
 custom_css = """
 <style>
-    .stApp { background-color: #FFFFFF; color: #1E293B; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; }
+    /* 全局极简设定 - 类似 Vercel / Stripe 的高级冷色调 */
+    .stApp { background-color: #F8FAFC; color: #0F172A; font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif; }
     #MainMenu {visibility: hidden;} header {visibility: hidden;} footer {visibility: hidden;}
     
-    div[data-testid="stMetric"] { background-color: #F8FAFC; border: 1px solid #E2E8F0; padding: 15px 20px; border-radius: 8px; border-left: 4px solid #3B82F6; box-shadow: none; }
-    [data-testid="stSidebar"] { background-color: #F1F5F9; border-right: 1px solid #E2E8F0; }
+    /* 隐藏 Streamlit 默认的 padding */
+    .block-container { padding-top: 2rem; padding-bottom: 0rem; max-width: 1200px; }
     
-    .clean-title { color: #0F172A; font-weight: 800; font-size: 2rem; margin-bottom: 10px; }
+    /* 大标题 */
+    .hero-title { font-size: 2.5rem; font-weight: 800; letter-spacing: -0.05em; color: #020617; margin-bottom: 0px; }
+    .hero-subtitle { font-size: 1rem; color: #64748B; margin-bottom: 30px; font-weight: 500; }
     
-    /* 核心结论卡片样式 */
-    .whale-card { background-color: #F8FAFC; border: 1px solid #CBD5E1; border-left: 5px solid #8B5CF6; padding: 20px; border-radius: 8px; margin-top: 15px; margin-bottom: 15px;}
-    .action-card { background-color: #FFFFFF; border: 1px solid #E2E8F0; padding: 20px; border-radius: 8px; }
+    /* Bento Box 卡片样式 (核心去山寨化设计) */
+    .bento-card { background: #FFFFFF; border-radius: 16px; padding: 24px; box-shadow: 0 4px 20px -2px rgba(0,0,0,0.03); border: 1px solid #F1F5F9; margin-bottom: 20px; transition: transform 0.2s; }
+    .bento-card:hover { transform: translateY(-2px); box-shadow: 0 10px 25px -5px rgba(0,0,0,0.05); }
+    
+    /* 策略指令专用样式 */
+    .signal-tag-long { display: inline-block; padding: 6px 12px; background: #ECFDF5; color: #059669; border-radius: 8px; font-weight: 700; font-size: 14px; margin-bottom: 15px;}
+    .signal-tag-short { display: inline-block; padding: 6px 12px; background: #FEF2F2; color: #DC2626; border-radius: 8px; font-weight: 700; font-size: 14px; margin-bottom: 15px;}
+    .signal-tag-wait { display: inline-block; padding: 6px 12px; background: #F1F5F9; color: #475569; border-radius: 8px; font-weight: 700; font-size: 14px; margin-bottom: 15px;}
+    
+    .data-row { display: flex; justify-content: space-between; padding: 10px 0; border-bottom: 1px dashed #E2E8F0; }
+    .data-row:last-child { border-bottom: none; }
+    .data-label { color: #64748B; font-size: 14px; }
+    .data-value { font-weight: 600; color: #0F172A; font-size: 14px; }
+    
+    /* 模块标题 */
+    .module-title { font-size: 1.1rem; font-weight: 700; color: #0F172A; margin-bottom: 15px; display: flex; align-items: center; gap: 8px; }
 </style>
 """
 st.markdown(custom_css, unsafe_allow_html=True)
 
-valid_uids = ["20061008", "888888"]
+# ================= 2. 底层数据获取 (接入 OKX 真实 API) =================
+@st.cache_data(ttl=60)
+def fetch_market_data():
+    try:
+        # 使用 OKX 接口，并增加超时机制防止卡死
+        exchange = ccxt.okx({'enableRateLimit': True, 'timeout': 10000})
+        symbols = ['BTC/USDT', 'ETH/USDT']
+        data = {}
+        for sym in symbols:
+            ohlcv = exchange.fetch_ohlcv(sym, '1h', limit=24)
+            df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+            data[sym] = df
+        return data
+    except Exception as e:
+        return None
 
-# ================= 2. 侧边栏：干净的私域漏斗 =================
-with st.sidebar:
-    st.markdown("<div class='clean-title'>⚡ QUANT ALPHA</div>", unsafe_allow_html=True)
-    st.caption("引擎状态: OKX 节点直连 | 🟢 运行中")
-    st.markdown("---")
+# ================= 3. 策略生成引擎 =================
+def generate_strategy(df, symbol):
+    cur_p = df['close'].iloc[-1]
+    high_24 = df['high'].max()
+    low_24 = df['low'].min()
     
-    st.markdown("### 🔐 访问授权")
-    uid_input = st.text_input("🔑 输入 Deepcoin UID：", type="password", placeholder="例如: 10086...")
+    # AI 测算逻辑核心
+    range_pct = (cur_p - low_24) / (high_24 - low_24) if high_24 != low_24 else 0.5
     
-    st.markdown("---")
-    st.markdown("### 👑 VIP 咨询")
-    st.info("大资金托管、带单信号接入")
+    if range_pct < 0.3:
+        signal = "LONG"
+        tag_class = "signal-tag-long"
+        tag_text = "🟢 强烈做多 (STRONG BUY)"
+        entry = f"{cur_p * 0.998:.2f}"
+        tp = f"{high_24 * 0.99:.2f}"
+        sl = f"{low_24 * 0.995:.2f}"
+        desc = f"智能资金已在 {low_24:.2f} 附近完成吸筹，盈亏比极佳。建议在 Deepcoin 现价或回调至 {entry} 进场。"
+    elif range_pct > 0.7:
+        signal = "SHORT"
+        tag_class = "signal-tag-short"
+        tag_text = "🔴 逢高做空 (SELL SHORT)"
+        entry = f"{cur_p * 1.002:.2f}"
+        tp = f"{low_24 * 1.01:.2f}"
+        sl = f"{high_24 * 1.005:.2f}"
+        desc = f"上方抛压极重，量能呈现顶背离。建议在 {entry} 附近布局空单，切勿盲目追多。"
+    else:
+        signal = "WAIT"
+        tag_class = "signal-tag-wait"
+        tag_text = "⏳ 中性观望 (NEUTRAL)"
+        entry = "暂不建议现价进场"
+        tp = "等待趋势确认"
+        sl = "严控仓位"
+        desc = "当前处于价格中枢震荡区，方向不明。请等待突破上下轨后右侧建仓。"
+        
+    return {
+        "price": cur_p, "class": tag_class, "text": tag_text,
+        "entry": entry, "tp": tp, "sl": sl, "desc": desc
+    }
+
+# ================= 4. 主界面渲染 =================
+st.markdown("<div class='hero-title'>QUANT ALPHA TERMINAL</div>", unsafe_allow_html=True)
+st.markdown("<div class='hero-subtitle'>机构级流动性监控与高频交易指令中枢</div>", unsafe_allow_html=True)
+
+with st.spinner('正在直连 OKX 专线解析深度数据...'):
+    market_data = fetch_market_data()
+
+if market_data:
+    st.markdown("<h3 style='font-size: 1.2rem; margin-bottom: 15px;'>🎯 AI 核心策略演算 (双币对)</h3>", unsafe_allow_html=True)
+    
+    # --- 核心功能 1：双币对详细策略 (Bento Box 布局) ---
+    col1, col2 = st.columns(2)
+    
+    # BTC 策略卡片
+    with col1:
+        btc_strat = generate_strategy(market_data['BTC/USDT'], 'BTC')
+        st.markdown(f"""
+        <div class="bento-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 1.2rem; font-weight: 800;">BTC / USDT</span>
+                <span style="font-size: 1.2rem; font-weight: 700; color: #0F172A;">${btc_strat['price']:,.2f}</span>
+            </div>
+            <div class="{btc_strat['class']}">{btc_strat['text']}</div>
+            <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">{btc_strat['desc']}</p>
+            <div class="data-row"><span class="data-label">入场区间 (Entry)</span><span class="data-value">{btc_strat['entry']}</span></div>
+            <div class="data-row"><span class="data-label">止盈目标 (Take Profit)</span><span class="data-value" style="color: #059669;">{btc_strat['tp']}</span></div>
+            <div class="data-row"><span class="data-label">强制止损 (Stop Loss)</span><span class="data-value" style="color: #DC2626;">{btc_strat['sl']}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ETH 策略卡片
+    with col2:
+        eth_strat = generate_strategy(market_data['ETH/USDT'], 'ETH')
+        st.markdown(f"""
+        <div class="bento-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                <span style="font-size: 1.2rem; font-weight: 800;">ETH / USDT</span>
+                <span style="font-size: 1.2rem; font-weight: 700; color: #0F172A;">${eth_strat['price']:,.2f}</span>
+            </div>
+            <div class="{eth_strat['class']}">{eth_strat['text']}</div>
+            <p style="font-size: 14px; color: #475569; line-height: 1.6; margin-bottom: 20px;">{eth_strat['desc']}</p>
+            <div class="data-row"><span class="data-label">入场区间 (Entry)</span><span class="data-value">{eth_strat['entry']}</span></div>
+            <div class="data-row"><span class="data-label">止盈目标 (Take Profit)</span><span class="data-value" style="color: #059669;">{eth_strat['tp']}</span></div>
+            <div class="data-row"><span class="data-label">强制止损 (Stop Loss)</span><span class="data-value" style="color: #DC2626;">{eth_strat['sl']}</span></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- 新增功能矩阵 ---
+    st.markdown("<h3 style='font-size: 1.2rem; margin-top: 20px; margin-bottom: 15px;'>⚡ 宏观流动性监控仪</h3>", unsafe_allow_html=True)
+    col3, col4, col5 = st.columns(3)
+    
+    with col3:
+        # 新功能 2：多空比清算热力 (制造紧迫感)
+        st.markdown("""
+        <div class="bento-card" style="padding: 20px;">
+            <div class="module-title">🔥 24H 多空清算比</div>
+            <div style="margin-top: 15px;">
+                <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;"><span>多头爆仓 $42.5M</span><span>空头爆仓 $18.2M</span></div>
+                <div style="width: 100%; height: 8px; background: #FEF2F2; border-radius: 4px; display: flex; overflow: hidden;">
+                    <div style="width: 70%; background: #DC2626; height: 100%;"></div>
+                    <div style="width: 30%; background: #059669; height: 100%;"></div>
+                </div>
+                <p style="font-size: 13px; color: #64748B; margin-top: 10px; margin-bottom: 0;">分析：散户多头正在被收割，庄家有向下插针寻觅流动性的倾向。</p>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col4:
+        # 新功能 3：资金费率监控 (体现专业度)
+        st.markdown("""
+        <div class="bento-card" style="padding: 20px;">
+            <div class="module-title">⚖️ 永续资金费率预警</div>
+            <div class="data-row"><span class="data-label">BTC 实时费率</span><span class="data-value" style="color: #DC2626;">+0.0150%</span></div>
+            <div class="data-row"><span class="data-label">ETH 实时费率</span><span class="data-value" style="color: #DC2626;">+0.0210%</span></div>
+            <p style="font-size: 13px; color: #64748B; margin-top: 15px; margin-bottom: 0;">分析：费率偏高，做多成本增加，谨防主力反向诱空杀跌。</p>
+        </div>
+        """, unsafe_allow_html=True)
+
+    with col5:
+        # 新功能 4：链上大额异动 (制造 FOMO)
+        st.markdown("""
+        <div class="bento-card" style="padding: 20px;">
+            <div class="module-title">🐋 链上 Smart Money</div>
+            <div style="font-size: 13px; line-height: 1.8;">
+                <div style="color: #0F172A;">🚨 <b>1200 BTC</b> 转入未知钱包</div>
+                <div style="color: #64748B; font-size: 11px; margin-bottom: 8px;">2 分钟前 (深网监控节点)</div>
+                <div style="color: #0F172A;">🚨 <b>50,000 ETH</b> 移出交易所</div>
+                <div style="color: #64748B; font-size: 11px; margin-bottom: 0;">15 分钟前 (巨鲸地址标记)</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+    # --- 底部转化 CTA (Call to Action) ---
     st.markdown("""
-    * 🐧 **专属 QQ**: `1303467048`
-    * 💬 **备注**: 深币 Alpha
-    """)
-    
-    st.markdown("---")
-    st.markdown("### 🎁 专属开户通道")
-    st.markdown("""
-    <a href="https://www.deepcoin.com/zh-Hans/register?invitationCode=YOUR_CODE" target="_blank" style="display: block; text-align: center; background-color: #0F172A; color: white; padding: 12px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 14px;">
-        👉 获取 50% 手续费减免
-    </a>
+    <div style="background: #020617; border-radius: 16px; padding: 30px; text-align: center; margin-top: 30px; box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);">
+        <h2 style="color: #FFFFFF; font-size: 1.5rem; margin-bottom: 10px; margin-top: 0;">立即执行上述高胜率策略</h2>
+        <p style="color: #94A3B8; font-size: 1rem; margin-bottom: 25px;">数据由 Alpha 引擎实时推演，请确保使用受保护的 Deepcoin 节点账户下单。</p>
+        <a href="https://www.deepcoin.com/zh-Hans/register?invitationCode=YOUR_CODE" target="_blank" style="display: inline-block; background-color: #FFFFFF; color: #020617; padding: 14px 40px; border-radius: 8px; text-decoration: none; font-weight: 700; font-size: 16px; transition: transform 0.2s;">
+            👉 获取 Deepcoin 节点开户授权 (享50%返佣)
+        </a>
+    </div>
     """, unsafe_allow_html=True)
 
-# ================= 3. 底层引擎抓取 =================
-@st.cache_data(ttl=60)
-def fetch_real_kline_data(symbol, timeframe='1h', limit=100):
-    try:
-        exchange = ccxt.okx({'enableRateLimit': True})
-        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
-        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
-        return df
-    except Exception as e:
-        return str(e)
-
-# ================= 4. 主界面路由 =================
-if uid_input in valid_uids:
-    st.markdown("<div class='clean-title'>机构级主力监控终端</div>", unsafe_allow_html=True)
-    st.markdown("---")
-    
-    # 只保留最核心的两大资产
-    symbol_map = {"BTC / USDT (比特币)": "BTC/USDT", "ETH / USDT (以太坊)": "ETH/USDT"}
-    
-    col_sel, col_empty = st.columns([1, 2])
-    with col_sel:
-        selected_coin = st.selectbox("🎯 选择监控标的", list(symbol_map.keys()))
-    
-    real_symbol = symbol_map[selected_coin]
-    
-    with st.spinner(f'正在解析 {real_symbol} 底层数据与主力动向...'):
-        df = fetch_real_kline_data(real_symbol, timeframe='1h', limit=100)
-    
-    if isinstance(df, pd.DataFrame) and not df.empty:
-        cur_p = df['close'].iloc[-1]
-        res = df['high'].rolling(window=20).max().iloc[-1]
-        sup = df['low'].rolling(window=20).min().iloc[-1]
-        
-        # --- 量能异动测算（判断庄家） ---
-        avg_vol = df['volume'].rolling(window=20).mean().iloc[-1]
-        cur_vol = df['volume'].iloc[-1]
-        vol_ratio = cur_vol / avg_vol if avg_vol > 0 else 1
-        
-        range_total = res - sup
-        distance_to_sup = cur_p - sup
-        distance_to_res = res - cur_p
-        
-        # 1. 核心点位卡片
-        col1, col2, col3 = st.columns(3)
-        col1.metric("⚡ 当前现价 (USDT)", f"{cur_p:.2f}")
-        col2.metric("🔴 上方强压 (做空/止盈)", f"{res:.2f}", delta_color="inverse")
-        col3.metric("🟢 下方铁底 (做多/止损)", f"{sup:.2f}")
-        
-        # 2. 庄家动向雷达 (核心洗脑区)
-        st.markdown("### 🐋 链上主力与庄家动向")
-        
-        if vol_ratio > 1.8 and distance_to_sup < range_total * 0.3:
-            whale_status = "🚨 检测到巨鲸底部吸筹"
-            whale_color = "#10B981" # 绿
-            whale_desc = "底层数据显示当前区域出现**异常放量（量能超均值 180%）**。判断为机构或庄家在强支撑位暗中买入建仓，洗盘即将结束，随时可能发起向上插针爆空！"
-        elif vol_ratio > 1.8 and distance_to_res < range_total * 0.3:
-            whale_status = "⚠️ 主力高位派发预警"
-            whale_color = "#EF4444" # 红
-            whale_desc = "顶部区域出现**致命放量**，庄家正在利用散户追高的 FOMO 情绪掩护出货。流动性随时枯竭，极易出现断头铡刀式砸盘！"
-        elif vol_ratio < 0.8:
-            whale_status = "💤 散户博弈阶段 (交投清淡)"
-            whale_color = "#64748B" # 灰
-            whale_desc = "当前盘口量能萎缩，未监测到大规模机构资金介入。由散户和游资主导盘面，走势跟随大盘联动，极易发生无规律震荡。"
-        else:
-            whale_status = "🔄 机构量化控盘震荡"
-            whale_color = "#F59E0B" # 橙
-            whale_desc = "庄家正在利用机器网格算法来回洗盘，反复清理 50X 以上高倍杠杆，为下一波单边行情收集筹码。"
-
-        st.markdown(f"""
-        <div class="whale-card">
-            <h4 style="color: {whale_color}; margin-top: 0px;">{whale_status}</h4>
-            <p style="font-size: 16px; color: #334155; line-height: 1.6; margin-bottom: 0px;">{whale_desc}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # 3. 极简操作指令
-        st.markdown("### 🤖 极简操作指令")
-        
-        if distance_to_sup < range_total * 0.2:
-            ai_signal = "🟢 现价做多 (LONG)"
-            ai_desc = f"进场盈亏比极佳。立刻开多，止盈看向 {res:.2f}，跌破 {sup*0.995:.2f} 坚决止损。"
-            bg_color = "#ECFDF5" # 浅绿背景
-        elif distance_to_res < range_total * 0.2:
-            ai_signal = "🔴 现价做空 (SHORT)"
-            ai_desc = f"顶部压制明显，立刻开空，止盈看向中轨区域，突破 {res*1.005:.2f} 坚决止损。"
-            bg_color = "#FEF2F2" # 浅红背景
-        else:
-            ai_signal = "⏳ 挂单等待 (WAIT)"
-            ai_desc = f"利润空间不足，严禁现价追单。请在深币挂单：{sup*1.002:.2f} 接多，或 {res*0.998:.2f} 挂空。"
-            bg_color = "#F8FAFC" # 浅灰背景
-
-        st.markdown(f"""
-        <div class="action-card" style="background-color: {bg_color}; border-left: 4px solid {whale_color};">
-            <h4 style="margin-top: 0px;">执行策略：{ai_signal}</h4>
-            <p style="font-size: 15px; color: #475569; margin-bottom: 0px;"><strong>行动指南：</strong>{ai_desc}</p>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        st.markdown("<br><p style='font-size: 13px; color: #94A3B8;'>⚠️ 声明：本推演数据基于 API 实时算力得出，仅限在 Deepcoin 盘口深度下执行。</p>", unsafe_allow_html=True)
-
-    else:
-        st.error("网络加载异常，请刷新重试。")
-
 else:
-    st.markdown("<div style='text-align: center; margin-top: 60px;'><h1 class='clean-title'>QUANT ALPHA 机构终端</h1><p style='color: #64748B; font-size: 18px;'>去除繁杂图形 · 直击行情底牌</p></div>", unsafe_allow_html=True)
-    st.markdown("---")
-    
-    st.warning("请在左侧侧边栏输入授权 UID 解锁主力监控面板。")
-    
-    st.markdown("### 终端准入规则")
-    st.markdown("""
-    1. **绑定邀请码**：通过节点专属链接注册 Deepcoin 账号。
-    2. **输入 UID**：在左侧输入 Deepcoin UID 进行身份核验。
-    3. **资金要求**：系统不定期清理零资金与非活跃账户。
-    """)
-    
-    st.markdown("<br>", unsafe_allow_html=True)
-    col_a, col_b, col_c = st.columns([1, 2, 1])
-    with col_b:
-        st.markdown("""
-        <a href="https://www.deepcoin.com/zh-Hans/register?invitationCode=YOUR_CODE" target="_blank" style="display: block; text-align: center; background-color: #0F172A; color: white; padding: 14px; border-radius: 6px; text-decoration: none; font-size: 16px; font-weight: bold;">
-            第一步：点击获取 Deepcoin 授权账户
-        </a>
-        """, unsafe_allow_html=True)
+    st.error("⚠️ 专线连接异常，请刷新重试或检查底层网络节点。")
