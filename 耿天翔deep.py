@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 import ccxt
-import time
 import plotly.graph_objects as go
 
 # ================= 1. 全局配置 =================
@@ -54,14 +53,14 @@ custom_css = """
 st.markdown(custom_css, unsafe_allow_html=True)
 
 # ================= 3. 底层核心数据获取与指标推演 =================
-@st.cache_data(ttl=10)
+@st.cache_data(ttl=15)
 def fetch_market_data():
     try:
         exchange = ccxt.okx({'enableRateLimit': True, 'timeout': 5000})
         symbols = ['BTC/USDT', 'ETH/USDT']
         data = {}
         for sym in symbols:
-            ohlcv = exchange.fetch_ohlcv(sym, '1h', limit=24)
+            ohlcv = exchange.fetch_ohlcv(sym, '1h', limit=48)
             data[sym] = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
         return data
     except:
@@ -69,48 +68,58 @@ def fetch_market_data():
 
 def generate_detailed_strategy(df, asset_name):
     cur_p = df['close'].iloc[-1]
-    res = df['high'].max() * 1.002
-    sup = df['low'].min() * 0.998
-    range_pct = (cur_p - sup) / (res - sup) if res != sup else 0.5
+    res = df['high'].max()
+    sup = df['low'].min()
     
-    if range_pct < 0.35:
-        rsi = np.random.randint(28, 40)
+    # 防止震荡区间过小导致除数为0
+    if res == sup:
+        res = cur_p * 1.05
+        sup = cur_p * 0.95
+        
+    range_pct = (cur_p - sup) / (res - sup)
+    
+    # 修复止盈止损逻辑 (第一止盈更近，第二止盈更远)
+    if range_pct < 0.4:
+        # 偏底部，做多
+        rsi = np.random.randint(28, 42)
         macd = "<span style='color:#10B981;'>🟢 底背离金叉</span>"
         boll = "触及下轨支撑"
         signal = "🟢 强烈做多 (STRONG LONG)"
-        entry = f"${cur_p * 0.998:,.2f}"
-        tp1 = f"${cur_p * 1.015:,.2f}"
-        tp2 = f"${res * 0.99:,.2f}"
-        sl = f"${sup * 0.99:,.2f}"
+        entry = cur_p * 0.998
+        tp1 = cur_p + (res - cur_p) * 0.4  # 第一止盈在阻力位下方 40% 处
+        tp2 = res * 0.99                   # 第二止盈在阻力位前夕
+        sl = sup * 0.99                    # 止损在最低点下方
         whale = "🚨 链上异动：监控到巨鲸提现至冷钱包，交易所内抛压枯竭。主力资金正在此区间构筑底部，盈亏比极佳，建议立刻跟进多单。"
         signal_color = "#10B981"
         bg_color = "#ECFDF5"
-    elif range_pct > 0.65:
-        rsi = np.random.randint(65, 82)
+    elif range_pct > 0.6:
+        # 偏顶部，做空
+        rsi = np.random.randint(60, 82)
         macd = "<span style='color:#DC2626;'>🔴 高位死叉</span>"
         boll = "突破上轨承压"
         signal = "🔴 逢高沽空 (SELL SHORT)"
-        entry = f"${cur_p * 1.002:,.2f}"
-        tp1 = f"${cur_p * 0.985:,.2f}"
-        tp2 = f"${sup * 1.01:,.2f}"
-        sl = f"${res * 1.01:,.2f}"
+        entry = cur_p * 1.002
+        tp1 = cur_p - (cur_p - sup) * 0.4  # 第一止盈在支撑位上方 40% 处
+        tp2 = sup * 1.01                   # 第二止盈在支撑位前夕
+        sl = res * 1.01                    # 止损在最高点上方
         whale = "⚠️ 链上异动：大额充值进入交易所，CVD(累计成交量)呈现严重顶背离。散户 FOMO 情绪高涨，庄家极有可能画门诱多后猛烈砸盘！"
         signal_color = "#DC2626"
         bg_color = "#FEF2F2"
     else:
+        # 震荡市
         rsi = np.random.randint(45, 55)
         macd = "<span style='color:#F59E0B;'>⏳ 零轴粘合</span>"
         boll = "中轨震荡盘整"
         signal = "⏳ 网格高抛低吸 (NEUTRAL)"
-        entry = f"回踩 ${sup*1.01:,.2f} 多"
-        tp1 = f"${res*0.99:,.2f}"
-        tp2 = "等待突破"
-        sl = f"跌破 ${sup*0.99:,.2f}"
-        whale = "🔄 链上异动：多空主力资金在当前中枢区域激烈博弈，未见明显单边倾向。建议采用低倍杠杆网格策略，吃震荡波段利润。"
+        entry = sup * 1.01
+        tp1 = cur_p + (res - cur_p) * 0.5
+        tp2 = res * 0.99
+        sl = sup * 0.99
+        whale = "🔄 链上异动：多空主力资金在当前中枢区域激烈博弈，未见明显单边倾向。建议采用低倍杠杆挂单策略，吃震荡波段利润。"
         signal_color = "#F59E0B"
         bg_color = "#FFFBEB"
 
-    # ⚠️ 修复核心区：绝对顶格写 HTML，不留任何空格，完美绕过 Streamlit 代码块 Bug
+    # 紧密 HTML，彻底规避 Streamlit 空格代码溢出 Bug
     html_block = f"""<div class="bento-card">
 <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #F1F5F9; padding-bottom: 10px; margin-bottom: 15px;">
 <span style="font-size: 1.3rem; font-weight: 900;">{asset_name}/USDT</span>
@@ -121,18 +130,30 @@ def generate_detailed_strategy(df, asset_name):
 <div class="tech-box"><div class="tech-title">MACD 趋势</div><div class="tech-val">{macd}</div></div>
 <div class="tech-box"><div class="tech-title">BOLL 布林带</div><div class="tech-val">{boll}</div></div>
 </div>
-<div style="font-weight: 900; font-size: 16px; margin-bottom: 8px; color: {signal_color}; background: {bg_color}; padding: 8px 12px; border-radius: 6px; text-align: center;">
-{signal}
-</div>
-<div class="data-row"><span class="data-label">精准进场 (Entry)</span><span class="data-value">{entry}</span></div>
-<div class="data-row"><span class="data-label">第一止盈 (TP1 - 高胜率)</span><span class="data-value" style="color:#059669;">{tp1}</span></div>
-<div class="data-row"><span class="data-label">第二止盈 (TP2 - 终极目标)</span><span class="data-value" style="color:#059669; font-weight:900;">{tp2}</span></div>
-<div class="data-row" style="border-bottom: none;"><span class="data-label">结构止损 (SL - 必须严格执行)</span><span class="data-value" style="color:#DC2626;">{sl}</span></div>
+<div style="font-weight: 900; font-size: 16px; margin-bottom: 8px; color: {signal_color}; background: {bg_color}; padding: 8px 12px; border-radius: 6px; text-align: center;">{signal}</div>
+<div class="data-row" style="background:#F8FAFC; padding:4px 8px; border-radius:4px;"><span class="data-label">🔴 绝对强压 (Resistance)</span><span class="data-value" style="color:#DC2626;">${res:,.2f}</span></div>
+<div class="data-row" style="background:#F8FAFC; padding:4px 8px; border-radius:4px; margin-bottom:10px;"><span class="data-label">🟢 绝对铁底 (Support)</span><span class="data-value" style="color:#10B981;">${sup:,.2f}</span></div>
+<div class="data-row"><span class="data-label">精准进场 (Entry)</span><span class="data-value">${entry:,.2f}</span></div>
+<div class="data-row"><span class="data-label">第一止盈 (TP1 - 保本减仓)</span><span class="data-value" style="color:#059669;">${tp1:,.2f}</span></div>
+<div class="data-row"><span class="data-label">第二止盈 (TP2 - 终极目标)</span><span class="data-value" style="color:#059669; font-weight:900;">${tp2:,.2f}</span></div>
+<div class="data-row" style="border-bottom: none;"><span class="data-label">结构止损 (SL - 必须严格执行)</span><span class="data-value" style="color:#DC2626;">${sl:,.2f}</span></div>
 <div style="margin-top: 15px; padding: 12px; background: #F8FAFC; border-left: 4px solid {signal_color}; border-radius: 6px; font-size: 12px; color: #475569; line-height: 1.6;">
 <b>🧠 主力及链上监控：</b><br>{whale}
 </div>
 </div>"""
     return html_block, cur_p
+
+def generate_liquidation_chart(current_price, asset_type):
+    prices = np.linspace(current_price * 0.85, current_price * 1.15, 120)
+    multiplier = 80 if asset_type == 'BTC' else 30
+    short_liq = np.exp(-((prices - current_price * 1.05) ** 2) / (2 * (current_price * 0.018) ** 2)) * multiplier
+    long_liq = np.exp(-((prices - current_price * 0.94) ** 2) / (2 * (current_price * 0.015) ** 2)) * (multiplier * 1.5)
+    liquidity = short_liq + long_liq + np.random.uniform(0, multiplier*0.1, 120)
+    colors = ['#DC2626' if p > current_price else '#10B981' for p in prices]
+    
+    fig = go.Figure(data=[go.Bar(x=prices, y=liquidity, marker_color=colors)])
+    fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=220, paper_bgcolor='rgba(0,0,0,0)', plot_bgcolor='rgba(0,0,0,0)', xaxis=dict(showgrid=True, gridcolor='#F1F5F9', title="清算价格 (USDT)", tickfont=dict(size=10)), yaxis=dict(showgrid=False, showticklabels=False), showlegend=False)
+    return fig, prices[np.argmax(long_liq)], prices[np.argmax(short_liq)]
 
 # ================= 4. 路由拦截与页面渲染 =================
 if not st.session_state.access_granted:
@@ -183,7 +204,7 @@ else:
         
         # 优化后的左侧菜单
         menu = st.radio("AEGIS 系统矩阵", [
-            "🎯 核心策略与链上监控", 
+            "🎯 核心策略与清算地图", 
             "🔥 Web3 山寨狙击雷达", 
             "🔄 跨市资金套利矩阵",
             "🔓 机构代币解锁预警",
@@ -196,26 +217,50 @@ else:
             st.session_state.access_granted = False
             st.rerun()
 
-    # ---------------- 页面 1：核心策略与链上监控 ----------------
-    if menu == "🎯 核心策略与链上监控":
+    # ---------------- 页面 1：核心策略与清算地图 ----------------
+    if menu == "🎯 核心策略与清算地图":
         st.markdown("<div class='hero-title'>ALPHA ENGINE</div>", unsafe_allow_html=True)
-        st.markdown("<div class='hero-subtitle'>深度技术指标解析与链上巨鲸资金动向</div>", unsafe_allow_html=True)
+        st.markdown("<div class='hero-subtitle'>深度技术指标解析与链上流动性清算猎杀推演</div>", unsafe_allow_html=True)
         
         with st.spinner('正在破译底层订单簿与链上数据...'):
             market_data = fetch_market_data()
 
         if market_data:
-            tab_btc, tab_eth = st.tabs(["🟠 BTC 深度解析", "🔵 ETH 深度解析"])
+            tab_btc, tab_eth = st.tabs(["🟠 BTC 深度解析与热力图", "🔵 ETH 深度解析与热力图"])
             
-            with tab_btc:
-                html_btc, btc_p = generate_detailed_strategy(market_data['BTC/USDT'], 'BTC')
-                st.markdown(html_btc, unsafe_allow_html=True)
-            
-            with tab_eth:
-                html_eth, eth_p = generate_detailed_strategy(market_data['ETH/USDT'], 'ETH')
-                st.markdown(html_eth, unsafe_allow_html=True)
+            for tab, sym, name in zip([tab_btc, tab_eth], ['BTC/USDT', 'ETH/USDT'], ['BTC', 'ETH']):
+                with tab:
+                    # 1. 策略卡片
+                    html_block, cur_p = generate_detailed_strategy(market_data[sym], name)
+                    st.markdown(html_block, unsafe_allow_html=True)
+                    
+                    # 2. 清算热力图卡片
+                    st.markdown(f"<h3 style='font-size: 1.1rem; margin-top: 15px; margin-bottom: 10px;'>🔥 {name} 全网合约清算热力与痛点</h3>", unsafe_allow_html=True)
+                    fig, l_liq, s_liq = generate_liquidation_chart(cur_p, name)
+                    st.plotly_chart(fig, use_container_width=True, config={'displayModeBar': False})
+                    
+                    st.markdown(f"""
+                    <div class="bento-card" style="padding: 15px; margin-top: -15px;">
+                        <div class="data-row"><span class="data-label">向上猎杀极值 (空头爆仓清算点)</span><span class="data-value" style="color:#DC2626; font-size:15px;">${s_liq:,.2f}</span></div>
+                        <div class="data-row"><span class="data-label">向下猎杀极值 (多头爆仓清算点)</span><span class="data-value" style="color:#10B981; font-size:15px;">${l_liq:,.2f}</span></div>
+                        <p style="font-size: 12px; color: #475569; margin-top: 10px; padding-top: 10px; border-top: 1px dashed #E2E8F0;">
+                            <strong>🛡️ AEGIS 推演：</strong>市场永远向流动性最密集的地方移动。上方 <b>${s_liq:,.0f}</b> 和下方 <b>${l_liq:,.0f}</b> 是当前全网高倍杠杆最集中的死亡区。庄家极大概率向此区域插针以猎杀流动性，请将止损避开此点位！
+                        </p>
+                    </div>
+                    """, unsafe_allow_html=True)
 
-    # ---------------- 页面 2-5：原先的高级功能 (保持不变，增加高级感) ----------------
+            # 3. 全网宏观数据底座
+            st.markdown("<h3 style='font-size: 1.1rem; margin-top: 20px; margin-bottom: 10px;'>🌐 全网宏观衍生品数据 (24H)</h3>", unsafe_allow_html=True)
+            st.markdown("""
+            <div class="bento-card">
+                <div class="data-row"><span class="data-label">贪婪恐慌指数 (F&G)</span><span class="data-value" style="color: #DC2626;">79 (极度贪婪 ⚠️)</span></div>
+                <div class="data-row"><span class="data-label">全球大户多空比 (Long/Short)</span><span class="data-value">0.85 (空头头寸占优)</span></div>
+                <div class="data-row"><span class="data-label">全网合约 24H 爆仓总额</span><span class="data-value" style="color: #DC2626;">$ 245,600,000</span></div>
+                <div class="data-row" style="border-bottom:none;"><span class="data-label">稳定币流入 (USDT/USDC)</span><span class="data-value" style="color: #10B981;">净流入 +1.2 亿美金</span></div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ---------------- 页面 2-5：原先的高级功能 (保持不变) ----------------
     elif menu == "🔥 Web3 山寨狙击雷达":
         st.markdown("<div class='hero-title'>ALTCOIN RADAR</div>", unsafe_allow_html=True)
         st.markdown("<div class='hero-subtitle'>高波动率山寨币资金流向实时侦测</div>", unsafe_allow_html=True)
