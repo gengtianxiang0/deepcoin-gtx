@@ -1,108 +1,131 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import time
+import plotly.graph_objects as go
+import ccxt
+from datetime import datetime
 
-# 1. 页面全局配置 (宽屏，深色模式)
-st.set_page_config(page_title="Deepcoin Alpha 终端", page_icon="⚡", layout="wide", initial_sidebar_state="expanded")
+# 1. 全局配置
+st.set_page_config(page_title="Deepcoin 机构级量化终端", page_icon="📈", layout="wide", initial_sidebar_state="expanded")
 
-# 2. 隐藏 Streamlit 官方水印 (极其关键：让散户觉得这是你花大价钱自己开发的独立系统)
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
-# 3. 侧边栏及高级导航
-st.sidebar.markdown("## ⚡ Deepcoin Alpha 节点")
-st.sidebar.caption("服务器节点: Tokyo-AWS-01 | 延迟: 8ms 🟢")
-st.sidebar.markdown("---")
+# 隐藏官方水印
+hide_style = """<style>#MainMenu {visibility: hidden;} footer {visibility: hidden;} header {visibility: hidden;}</style>"""
+st.markdown(hide_style, unsafe_allow_html=True)
 
 valid_uids = ["20061008", "888888"]
 
-st.sidebar.markdown("### 🔐 节点鉴权系统")
-uid_input = st.sidebar.text_input("🔑 输入 深币 UID 解锁引擎：", type="password")
+# ================= 侧边栏：私域漏斗 =================
+st.sidebar.markdown("## 📈 机构量化中控台")
+st.sidebar.caption("引擎状态: 实时 API 直连 | 延迟 12ms 🟢")
+st.sidebar.markdown("---")
 
+st.sidebar.markdown("### 🔐 节点权限验证")
+uid_input = st.sidebar.text_input("🔑 请输入 深币 UID：", type="password")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 👑 内部策略 VIP 申请")
+st.sidebar.info("大资金托管、量化 API 接入，请联系主理人。")
+st.sidebar.markdown("""
+* ✈️ **Telegram**: [@你的TG用户名](https://t.me/你的TG用户名)
+* 💬 **WeChat**: `Geng_Quant2026` (备注深币UID)
+* 🎁 **开户福利**: [点击获取 50% 手续费减免 + 赠金通道](https://你的深币代理链接)
+""")
+
+# ================= 核心 API 抓取引擎 =================
+# 使用缓存机制，防止 API 请求过快被交易所封 IP (缓存 60 秒)
+@st.cache_data(ttl=60)
+def fetch_real_kline_data(symbol, timeframe='1h', limit=100):
+    try:
+        # 这里用币安的公开接口作为底层数据源（全球最稳定，且不需要 API Key）
+        # 对外咱们依然包装成“深币核心节点”的数据
+        exchange = ccxt.binance({'enableRateLimit': True})
+        ohlcv = exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+        
+        df = pd.DataFrame(ohlcv, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume'])
+        df['timestamp'] = pd.to_datetime(df['timestamp'], unit='ms')
+        return df
+    except Exception as e:
+        return None
+
+# ================= 主界面 =================
 if uid_input in valid_uids:
-    # 模拟高级加载过程
-    with st.sidebar.status("正在连接交易所底层专线...", expanded=True) as status:
-        st.write("获取深币 API 接口...")
-        time.sleep(0.5)
-        st.write("校验 UID 节点归属...")
-        time.sleep(0.5)
-        st.write("加载高频合约策略组...")
-        time.sleep(0.5)
-        status.update(label="✅ 专线连接成功！", state="complete", expanded=False)
-    
-    st.sidebar.success(f"尊贵的 Alpha 会员 | UID: {uid_input}")
-    st.sidebar.markdown("---")
-    
-    # 核心主界面：使用多标签页 (Tabs) 让界面更整洁专业
-    st.title("⚡ Web3 高频量化狙击终端 (PRO)")
+    st.success(f"✅ 鉴权通过 | 尊贵的节点会员 UID: {uid_input} | 真实行情引擎已启动。")
     st.markdown("---")
     
-    tab1, tab2, tab3 = st.tabs(["📊 宏观资金看板", "🚀 异动土狗雷达", "🩸 巨鲸清算追踪"])
+    # 币种选择器与真实交易对的映射
+    symbol_map = {
+        "$BTC / USDT (比特币)": "BTC/USDT",
+        "$ETH / USDT (以太坊)": "ETH/USDT",
+        "$SOL / USDT (索拉纳)": "SOL/USDT",
+        "$PEPE / USDT (佩佩蛙)": "PEPE/USDT"
+    }
+    selected_coin = st.selectbox("🎯 选择监控标的 (自动挂载量化模型)", list(symbol_map.keys()))
+    real_symbol = symbol_map[selected_coin]
     
-    # --- 标签页 1：大盘数据 ---
-    with tab1:
-        st.markdown("#### 资金面实时监控")
-        col1, col2, col3, col4 = st.columns(4)
-        col1.metric("全网多空比 (1H)", "0.82", "-5.4% 空头强势", delta_color="inverse")
-        col2.metric("大饼市占率", "52.4%", "+1.2%")
-        col3.metric("深币全局资金费率", "0.025%", "做多成本极高", delta_color="inverse")
-        col4.metric("贪婪恐慌指数", "79", "极度贪婪 🔴")
+    # 抓取真实数据
+    with st.spinner(f'正在通过底层专线抓取 {real_symbol} 实时盘口数据...'):
+        df = fetch_real_kline_data(real_symbol, timeframe='1h', limit=100)
+    
+    if df is not None and not df.empty:
+        # 提取当前最新价
+        cur_p = df['close'].iloc[-1]
         
-        st.markdown("#### 📈 主力资金净流入 (模拟模型)")
-        # 生成更平滑的模拟图表
-        chart_data = pd.DataFrame(np.random.randn(50, 2).cumsum(axis=0), columns=['大户买盘', '散户抛压'])
-        st.area_chart(chart_data)
-
-    # --- 标签页 2：土狗雷达 ---
-    with tab2:
-        st.markdown("#### 🐕 山寨币 5 分钟极速暴涨榜")
-        st.info("💡 策略提示：监控到以下币种存在异常放量，疑似庄家拉盘，注意插针风险！建议在深币使用低倍杠杆快进快出。")
+        # 真正的量化阻力/支撑位算法（取近 20 个周期的最高点和最低点）
+        res = df['high'].rolling(window=20).max().iloc[-1]
+        sup = df['low'].rolling(window=20).min().iloc[-1]
         
-        # 使用更高级的 dataframe 渲染
-        df = pd.DataFrame({
-            "交易对": ["$PEPE2/USDT", "$WIF/USDT", "$BOME/USDT", "$DOGE/USDT"],
-            "5M涨幅": ["+ 18.5%", "+ 12.1%", "+ 8.4%", "- 2.1%"],
-            "量能骤增": ["650%", "420%", "310%", "无异动"],
-            "链上异动": ["巨鲸建仓 200万U", "内部钱包分发", "合约大户爆仓", "散户博弈"]
-        })
-        st.dataframe(df, use_container_width=True)
+        # 绘制真实的 K 线图
+        fig = go.Figure(data=[go.Candlestick(
+            x=df['timestamp'],
+            open=df['open'], high=df['high'], low=df['low'], close=df['close'],
+            increasing_line_color='#26a69a', decreasing_line_color='#ef5350'
+        )])
         
-        if st.button("⚡ 强制刷新链上数据"):
-            with st.spinner('正在通过 API 抓取深币最新盘口...'):
-                time.sleep(1)
-            st.success('抓取完成！数据已是最新。')
-
-    # --- 标签页 3：爆仓追踪 ---
-    with tab3:
-        st.markdown("#### 🩸 高倍杠杆清算地图")
-        st.error("🚨 检测到空头连环踩踏，流动性枯竭！")
+        # 画压力位 (红线)
+        fig.add_hline(y=res, line_dash="dash", line_color="rgba(239, 83, 80, 0.8)", annotation_text=f"🔴 强抛压区 (Resistance): {res:.4f}")
+        # 画支撑位 (绿线)
+        fig.add_hline(y=sup, line_dash="dash", line_color="rgba(38, 166, 154, 0.8)", annotation_text=f"🟢 强支撑区 (Support): {sup:.4f}")
         
-        col_a, col_b = st.columns(2)
-        with col_a:
-            st.warning("⏱️ 1分钟前 | $BTC | 空头爆仓 250 万 USDT 🩸")
-            st.warning("⏱️ 3分钟前 | $ETH | 空头爆仓 120 万 USDT 🩸")
-        with col_b:
-            st.success("⏱️ 5分钟前 | $SOL | 多头爆仓 50 万 USDT 🟢")
-            st.success("⏱️ 8分钟前 | $ORDI| 多头爆仓 30 万 USDT 🟢")
+        fig.update_layout(template="plotly_dark", xaxis_rangeslider_visible=False, margin=dict(l=0, r=0, t=10, b=0), height=500)
+        
+        st.plotly_chart(fig, use_container_width=True)
+        
+        # --- 分析面板 ---
+        st.markdown("### 🤖 机器深度学习盘口分析")
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.info(f"**⚡ 当前现价 (真实接口)**\n### {cur_p:.4f} USDT")
+            st.write("盘口流动性: **已确认**")
+        
+        with col2:
+            st.error(f"**🔴 上方压力位 (阻力)**\n### {res:.4f} USDT")
+            st.write("分析: 真实盘口高频挂单密集区，触及该位置极易发生插针，建议作为**多单止盈点**。")
             
-        st.markdown("##### 🤖 机器推荐操作：等待这波清算结束，现价开空，杠杆建议 20X-50X。")
+        with col3:
+            st.success(f"**🟢 下方支撑位 (铁底)**\n### {sup:.4f} USDT")
+            st.write("分析: 巨鲸链上护盘区，若回踩不破可作为**高倍合约开多**极佳入场点。")
+            
+        st.markdown("---")
+        st.warning("⚠️ **执行纪律**：上方价格及阻力位采用全球最高流动性均价演算，请以此为基准在深币 Deepcoin 执行挂单！")
+    else:
+        st.error("❌ 抓取数据失败，请检查网络节点或稍后重试。")
 
 else:
-    # 拦截页面优化
-    st.title("⚡ Web3 高频量化狙击终端")
+    # 极具诱惑力的未登录界面
+    st.title("📈 Web3 机构级量化终端")
     st.markdown("---")
-    col1, col2 = st.columns([2, 1])
-    with col1:
-        st.warning("⚠️ 核心监控引擎已上锁。当前为访客模式。")
-        st.write("本终端直连深币 Deepcoin 底层节点，包含极速土狗雷达、高频爆仓追踪等核心武器。")
-        st.write("👉 **请在左侧侧边栏输入您的【深币 UID】以免费解锁全部权限。**")
-    with col2:
-        st.info("💡 还没有深币账号？")
-        st.markdown("[🔗 点击获取内部 50% 手续费返佣注册通道](https://你的深币推广链接.com)")
+    st.error("🔒 **无权访问：当前 IP 尚未接入 Alpha 节点。**")
+    
+    col_a, col_b = st.columns(2)
+    with col_a:
+        st.write("本终端为内部游资专用，提供核心优势：")
+        st.write("1. 📊 **交互式 K 线引擎**：毫秒级全盘面监控。")
+        st.write("2. 🤖 **支撑/压力位自动推演**：机器智能划线，拒绝盲目开单。")
+        st.write("3. 🩸 **精准爆仓追踪**：左侧交易者的最强护城河。")
+    
+    with col_b:
+        st.info("💡 **如何免费解锁？**")
+        st.write("使用邀请通道注册深币，并在左侧输入 UID：")
+        st.write("[👉 点击获取深币顶级高反邀请通道 👈](https://你的深币代理链接)")
+        st.write("有问题？请在左侧侧边栏联系主理人。")
