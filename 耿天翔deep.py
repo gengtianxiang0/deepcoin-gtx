@@ -38,7 +38,6 @@ custom_css = """
     .data-label { color: #64748B; font-weight: 500; }
     .data-value { font-weight: 700; color: #0F172A; }
     
-    /* 技术指标 Grid 布局 */
     .tech-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 15px; }
     .tech-box { background: #F1F5F9; padding: 10px; border-radius: 8px; text-align: center; }
     .tech-title { font-size: 11px; color: #64748B; margin-bottom: 4px; font-weight: 600; text-transform: uppercase;}
@@ -74,7 +73,6 @@ def generate_detailed_strategy(df, asset_name):
     sup = df['low'].min() * 0.998
     range_pct = (cur_p - sup) / (res - sup) if res != sup else 0.5
     
-    # 模拟高级技术指标与链上数据
     if range_pct < 0.35:
         rsi = np.random.randint(28, 40)
         macd = "<span style='color:#10B981;'>🟢 底背离金叉</span>"
@@ -112,33 +110,28 @@ def generate_detailed_strategy(df, asset_name):
         signal_color = "#F59E0B"
         bg_color = "#FFFBEB"
 
-    html_block = f"""
-    <div class="bento-card">
-        <div style="display: flex; justify-content: space-between; border-bottom: 2px solid #F1F5F9; padding-bottom: 10px; margin-bottom: 15px;">
-            <span style="font-size: 1.3rem; font-weight: 900;">{asset_name}/USDT</span>
-            <span style="font-size: 1.5rem; font-weight: 800; color: #0F172A;">${cur_p:,.2f}</span>
-        </div>
-        
-        <div class="tech-grid">
-            <div class="tech-box"><div class="tech-title">RSI (1H)</div><div class="tech-val">{rsi}</div></div>
-            <div class="tech-box"><div class="tech-title">MACD 趋势</div><div class="tech-val">{macd}</div></div>
-            <div class="tech-box"><div class="tech-title">BOLL 布林带</div><div class="tech-val">{boll}</div></div>
-        </div>
-
-        <div style="font-weight: 900; font-size: 16px; margin-bottom: 8px; color: {signal_color}; background: {bg_color}; padding: 8px 12px; border-radius: 6px; text-align: center;">
-            {signal}
-        </div>
-        
-        <div class="data-row"><span class="data-label">精准进场 (Entry)</span><span class="data-value">{entry}</span></div>
-        <div class="data-row"><span class="data-label">第一止盈 (TP1 - 高胜率)</span><span class="data-value" style="color:#059669;">{tp1}</span></div>
-        <div class="data-row"><span class="data-label">第二止盈 (TP2 - 终极目标)</span><span class="data-value" style="color:#059669; font-weight:900;">{tp2}</span></div>
-        <div class="data-row" style="border-bottom: none;"><span class="data-label">结构止损 (SL - 必须严格执行)</span><span class="data-value" style="color:#DC2626;">{sl}</span></div>
-        
-        <div style="margin-top: 15px; padding: 12px; background: #F8FAFC; border-left: 4px solid {signal_color}; border-radius: 6px; font-size: 12px; color: #475569; line-height: 1.6;">
-            <b>🧠 主力及链上监控：</b><br>{whale}
-        </div>
-    </div>
-    """
+    # ⚠️ 修复核心区：绝对顶格写 HTML，不留任何空格，完美绕过 Streamlit 代码块 Bug
+    html_block = f"""<div class="bento-card">
+<div style="display: flex; justify-content: space-between; border-bottom: 2px solid #F1F5F9; padding-bottom: 10px; margin-bottom: 15px;">
+<span style="font-size: 1.3rem; font-weight: 900;">{asset_name}/USDT</span>
+<span style="font-size: 1.5rem; font-weight: 800; color: #0F172A;">${cur_p:,.2f}</span>
+</div>
+<div class="tech-grid">
+<div class="tech-box"><div class="tech-title">RSI (1H)</div><div class="tech-val">{rsi}</div></div>
+<div class="tech-box"><div class="tech-title">MACD 趋势</div><div class="tech-val">{macd}</div></div>
+<div class="tech-box"><div class="tech-title">BOLL 布林带</div><div class="tech-val">{boll}</div></div>
+</div>
+<div style="font-weight: 900; font-size: 16px; margin-bottom: 8px; color: {signal_color}; background: {bg_color}; padding: 8px 12px; border-radius: 6px; text-align: center;">
+{signal}
+</div>
+<div class="data-row"><span class="data-label">精准进场 (Entry)</span><span class="data-value">{entry}</span></div>
+<div class="data-row"><span class="data-label">第一止盈 (TP1 - 高胜率)</span><span class="data-value" style="color:#059669;">{tp1}</span></div>
+<div class="data-row"><span class="data-label">第二止盈 (TP2 - 终极目标)</span><span class="data-value" style="color:#059669; font-weight:900;">{tp2}</span></div>
+<div class="data-row" style="border-bottom: none;"><span class="data-label">结构止损 (SL - 必须严格执行)</span><span class="data-value" style="color:#DC2626;">{sl}</span></div>
+<div style="margin-top: 15px; padding: 12px; background: #F8FAFC; border-left: 4px solid {signal_color}; border-radius: 6px; font-size: 12px; color: #475569; line-height: 1.6;">
+<b>🧠 主力及链上监控：</b><br>{whale}
+</div>
+</div>"""
     return html_block, cur_p
 
 # ================= 4. 路由拦截与页面渲染 =================
